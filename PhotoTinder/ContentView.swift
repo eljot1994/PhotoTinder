@@ -20,18 +20,10 @@ struct ContentView: View {
                 HStack {
                     VStack(alignment: .leading) {
                         if viewModel.totalPhotosCount > 0 && !viewModel.permissionDenied {
-                            let currentPhotoNumber: Int
-                            if viewModel.photos.isEmpty {
-                                currentPhotoNumber = viewModel.totalPhotosCount
-                            } else {
-                                currentPhotoNumber = viewModel.totalPhotosCount - viewModel.photos.count + (viewModel.currentIndex + 1)
-                            }
-
-                            Text("Zdjęcie \(currentPhotoNumber) z \(viewModel.totalPhotosCount)")
+                            Text("Zdjęcie \(viewModel.currentPhotoNumberForDisplay) z \(viewModel.totalPhotosCount)")
                                 .font(.headline)
-                                .foregroundColor(.primary) // Dostosowuje się do motywu
-                                .padding(.leading, 5) // Dodatkowy padding dla tekstu
 
+                            
                             ProgressView(value: viewModel.progressValue)
                                 .progressViewStyle(LinearProgressViewStyle(tint: .accentColor)) // Zmieniono na accentColor dla lepszej adaptacji
                                 .frame(width: 150)
