@@ -15,6 +15,19 @@ class PhotoTestViewModel: ObservableObject {
 
     private let processedPhotosKey = "processedPhotos"
     @Published private(set) var processedPhotos: Set<String> = []
+    
+    @Published var activeFilterType: PhotoFilterType = .albums
+    @Published var albumSources: [PhotoSource] = []
+    @Published var mediaTypeSources: [PhotoSource] = []
+    @Published var categorySources: [PhotoSource] = []
+    @Published var selectedSourceIDs: Set<String> = [] {
+        didSet {
+            loadAllPhotos()
+        }
+    }
+
+    @Published var allAlbums: [PHAssetCollection] = []
+    @Published var destinationAlbumIDs: Set<String> = []
 
     init() {
         loadProcessedPhotos()
@@ -45,17 +58,48 @@ class PhotoTestViewModel: ObservableObject {
         switch status {
         case .authorized, .limited:
             self.permissionDenied = false
-            let fetched = PHAsset.fetchAssets(with: .image, options: fetchOptions)
 
-            self.totalPhotosCount = fetched.count
+            let albumFetchOptions = PHFetchOptions()
+            let userAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: albumFetchOptions)
+            var allAlbums: [PHAssetCollection] = []
+            userAlbums.enumerateObjects { album, _, _ in
+                allAlbums.append(album)
+            }
+            self.allAlbums = allAlbums
+            self.albumSources = allAlbums.map { PhotoSource(collection: $0) }
+            
+            var fetchedAssets: PHFetchResult<PHAsset>
+            
+            if !selectedSourceIDs.isEmpty {
+                let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: Array(selectedSourceIDs), options: nil)
+                
+                var assetsArray = [PHAsset]()
+                collections.enumerateObjects { collection, _, _ in
+                    let collectionAssets = PHAsset.fetchAssets(in: collection, options: fetchOptions)
+                    collectionAssets.enumerateObjects { asset, _, _ in
+                        assetsArray.append(asset)
+                    }
+                }
+                
+                let selectedAssetIDs = assetsArray.map { $0.localIdentifier }
+                let finalFetchOptions = PHFetchOptions()
+                finalFetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+                finalFetchOptions.predicate = NSPredicate(format: "localIdentifier IN %@", selectedAssetIDs)
+                fetchedAssets = PHAsset.fetchAssets(with: finalFetchOptions)
+                
+            } else {
+                fetchedAssets = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+            }
+
+            self.totalPhotosCount = fetchedAssets.count
 
             var result: [PhotoModel] = []
-
-            fetched.enumerateObjects { asset, _, stop in
+            fetchedAssets.enumerateObjects { asset, _, stop in
                 if !self.processedPhotos.contains(asset.localIdentifier) {
                     result.append(PhotoModel(asset: asset))
                 }
             }
+            
             DispatchQueue.main.async {
                 self.photos = result
                 self.currentIndex = 0
@@ -102,10 +146,10 @@ class PhotoTestViewModel: ObservableObject {
         if dir.width < -threshold {
             action = "Do kosza"
             addToTrashAlbum(asset: asset)
-            feedbackGenerator = UIImpactFeedbackGenerator(style: .heavy) // Średni nacisk dla odrzucenia
+            feedbackGenerator = UIImpactFeedbackGenerator(style: .heavy)
         } else if dir.width > threshold {
             action = "Zostaje"
-            feedbackGenerator = UIImpactFeedbackGenerator(style: .light) // Lekki nacisk dla zachowania
+            feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
         } else if dir.height < -threshold {
             action = "Ulubione"
             PHPhotoLibrary.shared().performChanges({
@@ -128,18 +172,15 @@ class PhotoTestViewModel: ObservableObject {
         feedbackGenerator?.impactOccurred()
         feedbackGenerator = nil
 
-        // Zachowujemy historię cofania
         history.append((asset: asset, action: action))
         processedPhotos.insert(asset.localIdentifier)
         saveProcessedPhotos()
         decision = action
 
-        // 1. Płynne "odlecenie" zdjęcia
         withAnimation(.easeOut(duration: 0.2)) {
             offset = CGSize(width: offset.width * 3, height: offset.height * 3)
         }
 
-        // 2. Usunięcie zdjęcia i reset offsetu po animacji
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             if self.currentIndex < self.photos.count {
                 self.photos.remove(at: self.currentIndex)
@@ -151,13 +192,21 @@ class PhotoTestViewModel: ObservableObject {
         }
     }
 
+    // Nowa metoda do obsługi zdjęcia przeniesionego do albumu
+    func handlePhotoMoved(asset: PHAsset) {
+        self.history.append((asset: asset, action: "Przeniesione do albumu"))
+        self.processedPhotos.insert(asset.localIdentifier)
+        self.saveProcessedPhotos()
+        self.photos.remove(at: self.currentIndex)
+    }
+
     func undoLast() {
         guard let last = history.popLast() else { return }
         processedPhotos.remove(last.asset.localIdentifier)
         saveProcessedPhotos()
 
-        photos.insert(PhotoModel(asset: last.asset), at: 0) // Wstawiamy zdjęcie na początek kolejki
-        currentIndex = 0 // Ustawiamy bieżący indeks na 0, aby to zdjęcie było następne
+        photos.insert(PhotoModel(asset: last.asset), at: 0)
+        currentIndex = 0
         offset = .zero
         decision = nil
     }
@@ -190,7 +239,6 @@ class PhotoTestViewModel: ObservableObject {
         }
     }
 
-    // Funkcja do cofania konkretnej akcji dla zdjęcia z historii
     func undoSpecificAction(for historyItem: (asset: PHAsset, action: String?), completion: @escaping (Bool) -> Void) {
         let historyAsset = historyItem.asset
         let action = historyItem.action
@@ -199,9 +247,9 @@ class PhotoTestViewModel: ObservableObject {
             let request = PHAssetChangeRequest(for: historyAsset)
             switch action {
             case "Ukryte":
-                request.isHidden = false // Poprawka: Usunięto '?' - PHAssetChangeRequest jest non-optional
+                request.isHidden = false
             case "Ulubione":
-                request.isFavorite = false // Poprawka: Usunięto '?' - PHAssetChangeRequest jest non-optional
+                request.isFavorite = false
             case "Do kosza":
                 break
             case "Zostaje", .none:
@@ -230,12 +278,33 @@ class PhotoTestViewModel: ObservableObject {
             }
         }
     }
+    
+    func photoCount(for album: PHAssetCollection) -> Int {
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.predicate = NSPredicate(format: "mediaType = %d", PHAssetMediaType.image.rawValue)
+        return PHAsset.fetchAssets(in: album, options: fetchOptions).count
+    }
+    
+    func addPhotoToAlbum(asset: PHAsset, albumId: String, completion: @escaping (Bool) -> Void) {
+        guard let album = allAlbums.first(where: { $0.localIdentifier == albumId }) else {
+            completion(false)
+            return
+        }
+
+        PHPhotoLibrary.shared().performChanges({
+            let request = PHAssetCollectionChangeRequest(for: album)
+            request?.addAssets([asset] as NSArray)
+        }) { success, error in
+            DispatchQueue.main.async {
+                completion(success)
+            }
+        }
+    }
 
     var hasHistory: Bool {
         !history.isEmpty
     }
 
-    // New computed properties for display in ContentView
     var currentPhotoNumberForDisplay: Int {
         if photos.isEmpty {
             return totalPhotosCount

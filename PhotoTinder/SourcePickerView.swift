@@ -27,9 +27,13 @@ struct SourcePickerView: View {
                     case .albums:
                         sourceListView(for: viewModel.albumSources)
                     case .mediaTypes:
-                        sourceListView(for: viewModel.mediaTypeSources)
+                        // Obecnie brak implementacji, ale struktura jest gotowa
+                        Text("Brak typów multimediów do wyświetlenia.")
+                            .foregroundColor(.gray)
                     case .categories:
-                        sourceListView(for: viewModel.categorySources)
+                        // Obecnie brak implementacji, ale struktura jest gotowa
+                        Text("Brak kategorii do wyświetlenia.")
+                            .foregroundColor(.gray)
                     }
                 }
             }
@@ -44,7 +48,7 @@ struct SourcePickerView: View {
             }
         }
     }
-    
+
     // Widok dla przycisku czyszczącego filtry
     private var clearFilterButton: some View {
         Button(action: {
